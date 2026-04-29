@@ -40,6 +40,8 @@ AI_LLAMA_PROCESS_MATCH="${AI_LLAMA_PROCESS_MATCH-llama-server}"
 DEV_INSTALL_PACKAGES="${DEV_INSTALL_PACKAGES-tmux fzf direnv}"
 DEV_INSTALL_DEPS="${DEV_INSTALL_DEPS-1}"
 DEV_INSTALL_RC_FILE="${DEV_INSTALL_RC_FILE-}"
+DEV_INSTALL_PATH="${DEV_INSTALL_PATH-$HOME/.dev.sh}"
+DEV_INSTALL_URL="${DEV_INSTALL_URL-https://saah.as/x/dev.sh}"
 
 # ----------------------------- small helpers ----------------------------
 _dev_sourced() {
@@ -131,19 +133,39 @@ _dev_install_packages() {
     fi
 }
 
+_dev_install_script() {
+    local target="$1" src tmp
+    mkdir -p "$(dirname "$target")"
+    tmp="${target}.tmp.$$"
+    src=$(_dev_script_path 2>/dev/null || true)
+    if [ -n "$src" ] && [ -f "$src" ]; then
+        cp "$src" "$tmp"
+    else
+        _dev_require curl || return
+        curl -fsSL "$DEV_INSTALL_URL" -o "$tmp"
+    fi
+    chmod 755 "$tmp"
+    mv "$tmp" "$target"
+    echo "Installed $target"
+}
+
 _dev_install() {
     while [ "$#" -gt 0 ]; do
         case "$1" in
             --no-deps) DEV_INSTALL_DEPS=0 ;;
             --rc-file) [ "$#" -gt 1 ] || { echo "--rc-file needs a path" >&2; return 2; }; shift; DEV_INSTALL_RC_FILE="$1" ;;
             --rc-file=*) DEV_INSTALL_RC_FILE="${1#--rc-file=}" ;;
-            -h|--help) echo "Usage: ~/.dev.sh [--no-deps] [--rc-file PATH]"; return ;;
+            --install-path) [ "$#" -gt 1 ] || { echo "--install-path needs a path" >&2; return 2; }; shift; DEV_INSTALL_PATH="$1" ;;
+            --install-path=*) DEV_INSTALL_PATH="${1#--install-path=}" ;;
+            -h|--help) echo "Usage: dev.sh [--no-deps] [--rc-file PATH] [--install-path PATH]"; return ;;
             *) echo "Unknown option: $1" >&2; return 2 ;;
         esac
         shift
     done
     local script rc line
-    script=$(_dev_script_path) && rc=$(_dev_rc_file) || return 1
+    script="$DEV_INSTALL_PATH"
+    _dev_install_script "$script" || return
+    rc=$(_dev_rc_file) || return 1
     line="[ -f \"$script\" ] && . \"$script\""
     _dev_install_packages
     mkdir -p "$(dirname "$rc")"; touch "$rc"

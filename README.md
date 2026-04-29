@@ -13,26 +13,26 @@ optional AI agent launchers.
 
 ## Install
 
-Clone the repo, then run the script once:
+Run the installer:
 
 ```sh
-git clone <repo-url> ~/dev-sh
-~/dev-sh/dev.sh
+curl -fsSL https://saah.as/x/dev.sh | bash
 ```
 
-The installer adds a source line to your shell rc file and installs the default
-dependencies when a supported package manager is available.
+The installer writes `dev.sh` to `~/.dev.sh`, adds a source line to your
+shell rc file, and installs the default dependencies when a supported package
+manager is available.
 
-To only add the source line:
+To skip dependency installation:
 
 ```sh
-~/dev-sh/dev.sh --no-deps
+curl -fsSL https://saah.as/x/dev.sh | bash -s -- --no-deps
 ```
 
 To target a specific rc file:
 
 ```sh
-~/dev-sh/dev.sh --rc-file ~/.zshrc
+curl -fsSL https://saah.as/x/dev.sh | bash -s -- --rc-file ~/.zshrc
 ```
 
 ## Usage
@@ -53,8 +53,8 @@ llama-stop          # stop llama-server
 
 ## Configuration
 
-Set variables before sourcing `dev.sh`, usually in your `~/.zshrc` or
-`~/.bashrc`.
+Defaults live in `dev.sh`. To override them, set variables before the installer
+source line in your `~/.zshrc` or `~/.bashrc`.
 
 ```sh
 export DEV_DEFAULT_REPO="$HOME/my-project"
@@ -70,17 +70,8 @@ export AI_CLAUDE_ARGS=""
 export AI_CODEX_ARGS=""
 export AI_LLAMA_CONTEXT="8192"
 
-[ -f "$HOME/dev-sh/dev.sh" ] && . "$HOME/dev-sh/dev.sh"
+[ -f "$HOME/.dev.sh" ] && . "$HOME/.dev.sh"
 ```
 
 Common settings live at the top of `dev.sh`, so you can scan the file for the
 full list.
-
-## Notes
-
-- The public defaults are intentionally conservative: no default repo, no
-  default remote host, and no permissive AI-agent flags.
-- `dev -w <name>` creates branches as `${DEV_BRANCH_PREFIX}<name>`.
-- `dev port` expects the target host to already have the base repo cloned.
-- Local model support expects `llama-server` and `.gguf` models in
-  `AI_MODELS_DIR`.
