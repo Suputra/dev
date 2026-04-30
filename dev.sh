@@ -218,13 +218,13 @@ _dev_prepare_worktree() {
 }
 
 _dev_start_session() {
-    local name="$1" dir="${2:-}"
+    local name="$1" dir="${2:-}" cmd="${3-$DEV_SESSION_COMMAND}"
     if [ -n "$dir" ]; then
         tmux new-session -d -s "$name" -c "$dir"
     else
         tmux new-session -d -s "$name"
     fi
-    [ -z "$DEV_SESSION_COMMAND" ] || tmux send-keys -t "$name" "$DEV_SESSION_COMMAND" Enter
+    [ -z "$cmd" ] || tmux send-keys -t "$name" "$cmd" Enter
 }
 
 _dev_list_worktrees() {
@@ -276,11 +276,24 @@ _dev_clean() {
 }
 
 _dev_port() {
+    local detach=false run_cmd_set=false run_cmd
+    local -a port_args
+    port_args=()
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            -d|--detach|--no-attach) detach=true ;;
+            -r|--run) [ "$#" -gt 1 ] || { echo "--run needs a command" >&2; return 2; }; shift; run_cmd="$1"; run_cmd_set=true ;;
+            --run=*) run_cmd="${1#--run=}"; run_cmd_set=true ;;
+            *) port_args+=("$1") ;;
+        esac
+        shift
+    done
+    set -- "${port_args[@]}"
     local name="$1" remote="${2:-$DEV_REMOTE_HOST}"
-    [ -n "$name" ] && [ -n "$remote" ] || { echo "Usage: dev port <name> [remote-host]" >&2; return 1; }
+    [ -n "$name" ] && [ -n "$remote" ] || { echo "Usage: dev port [-d] [-r CMD] <name> [remote-host]" >&2; return 1; }
     _dev_require git ssh rsync || return
     local dir repo branch repo_name remote_repo remote_wt remote_base remote_cmd
-    local q_remote_base q_remote_repo q_remote_wt q_branch q_origin_branch
+    local q_name q_remote_base q_remote_repo q_remote_wt q_branch q_origin_branch q_run
     dir=$(_dev_path_join "$DEV_WORKTREES_DIR" "$name")
     [ -d "$dir" ] || { echo "No worktree at $dir" >&2; return 1; }
     repo=$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null) || { echo "Not a git worktree: $dir" >&2; return 1; }
@@ -289,6 +302,7 @@ _dev_port() {
     [ -n "$DEV_REMOTE_REPO_DIR" ] && remote_repo="$DEV_REMOTE_REPO_DIR" || remote_repo=$(_dev_path_join "$DEV_REMOTE_REPOS_DIR" "$repo_name")
     remote_wt=$(_dev_path_join "$DEV_REMOTE_WORKTREES_DIR" "$name")
     remote_base="${DEV_REMOTE_WORKTREES_DIR%/}"
+    q_name=$(_dev_sq "$name")
     q_remote_base=$(_dev_sq "$remote_base")
     q_remote_repo=$(_dev_sq "$remote_repo")
     q_remote_wt=$(_dev_sq "$remote_wt")
@@ -303,8 +317,24 @@ _dev_port() {
     for exclude in $(_dev_words "$DEV_RSYNC_EXCLUDES"); do rsync_args+=("--exclude=$exclude"); done
     echo "Syncing uncommitted changes..."
     rsync -az --delete "${rsync_args[@]}" "$dir/" "$remote:$remote_wt/" || return
-    echo "Attaching to remote tmux session '$name'..."
-    ssh -t "$remote" "tmux new-session -A -s $name -c $remote_wt"
+    if $detach; then
+        echo "Setting up detached remote tmux session '$name'..."
+        local remote_tmux="tmux new-session -A -d -s $q_name -c $q_remote_wt"
+        if $run_cmd_set; then
+            q_run=$(_dev_sq "$run_cmd")
+            remote_tmux="$remote_tmux && tmux send-keys -t $q_name $q_run Enter"
+        fi
+        ssh "$remote" "$remote_tmux" || return
+        echo "Session '$name' ready on $remote. Attach with: ssh -t $remote tmux attach -t $name"
+    else
+        echo "Attaching to remote tmux session '$name'..."
+        if $run_cmd_set; then
+            q_run=$(_dev_sq "$run_cmd")
+            ssh -t "$remote" "tmux new-session -A -d -s $q_name -c $q_remote_wt && tmux send-keys -t $q_name $q_run Enter && tmux attach -t $q_name"
+        else
+            ssh -t "$remote" "tmux new-session -A -s $q_name -c $q_remote_wt"
+        fi
+    fi
 }
 
 # ----------------------------- ai command -------------------------------
@@ -425,15 +455,24 @@ dev() {
         clean) shift; _dev_clean "$@"; return ;;
         port) shift; _dev_port "$@"; return ;;
         -h|--help)
-            echo "Usage: dev [-w] [name] | dev clean [--all|name...] | dev port <name> [remote]"
+            echo "Usage: dev [-w] [-d] [-r CMD] [name] | dev clean [--all|name...] | dev port [-d] <name> [remote]"
+            echo "  -w, --worktree     create/use a git worktree"
+            echo "  -d, --no-attach    create the session without attaching (for non-interactive callers)"
+            echo "  -r, --run CMD      command to send into the new session (overrides DEV_SESSION_COMMAND)"
             return ;;
     esac
 
-    local use_worktree=false name dir repo pick sessions worktrees combined
+    local use_worktree=false detach=false run_cmd_set=false run_cmd name dir repo pick sessions worktrees combined
     local -a args
     args=()
     while [ "$#" -gt 0 ]; do
-        case "$1" in -w|--worktree) use_worktree=true ;; *) args+=("$1") ;; esac
+        case "$1" in
+            -w|--worktree) use_worktree=true ;;
+            -d|--detach|--no-attach) detach=true ;;
+            -r|--run) [ "$#" -gt 1 ] || { echo "--run needs a command" >&2; return 2; }; shift; run_cmd="$1"; run_cmd_set=true ;;
+            --run=*) run_cmd="${1#--run=}"; run_cmd_set=true ;;
+            *) args+=("$1") ;;
+        esac
         shift
     done
     set -- "${args[@]}"
@@ -441,17 +480,29 @@ dev() {
 
     if [ -n "${1:-}" ]; then
         name="$1"; dir=$(_dev_path_join "$DEV_WORKTREES_DIR" "$name")
+        local -a start_args
         if ! tmux has-session -t "$name" 2>/dev/null; then
+            start_args=("$name")
             if $use_worktree; then
                 _dev_require git || return
                 repo=$(_dev_repo_root) || { echo "Not in a git repo and DEV_DEFAULT_REPO is not valid." >&2; return 1; }
                 _dev_prepare_worktree "$repo" "$dir" "$name" || return
-                _dev_start_session "$name" "$dir"
-            elif [ -d "$dir" ]; then _dev_start_session "$name" "$dir"
-            else _dev_start_session "$name"
+                start_args+=("$dir")
+            elif [ -d "$dir" ]; then
+                start_args+=("$dir")
+            else
+                start_args+=("")
             fi
+            $run_cmd_set && start_args+=("$run_cmd")
+            _dev_start_session "${start_args[@]}"
+        elif $run_cmd_set; then
+            tmux send-keys -t "$name" "$run_cmd" Enter
         fi
-        tmux attach-session -t "$name"
+        if $detach; then
+            echo "Session '$name' ready. Attach with: dev $name"
+        else
+            tmux attach-session -t "$name"
+        fi
         return
     fi
 

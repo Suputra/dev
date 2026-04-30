@@ -39,11 +39,14 @@ curl -fsSL https://saah.as/x/dev.sh | bash -s -- --rc-file ~/.zshrc
 
 ```sh
 dev                 # pick an existing tmux session or worktree with fzf
-dev api             # attach to/create a tmux session named api
-dev -w api          # create/use a git worktree and attach to it
-dev clean           # remove merged managed worktrees
-dev clean --all     # remove all managed worktrees
-dev port api host   # push/sync the api worktree to host and attach remotely
+dev api                       # attach to/create a tmux session named api
+dev -w api                    # create/use a git worktree and attach to it
+dev -w -d api                 # create the worktree + session without attaching (for scripts/agents)
+dev -w -d -r 'ai "fix X"' api # same, but run a specific command inside (e.g. launch an agent with a mission)
+dev clean                     # remove merged managed worktrees
+dev clean --all               # remove all managed worktrees
+dev port api host             # push/sync the api worktree to host and attach remotely
+dev port -d api host          # push/sync without attaching; pair with -r 'ai "..."' to run on the remote
 
 ai                  # launch the last used agent
 ai -p               # pick an agent
